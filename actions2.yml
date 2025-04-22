@@ -1,0 +1,83 @@
+name: Build, Test, and Deploy Java App
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: 🛠️ Build Application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Build with Maven
+        run: mvn clean compile
+
+      - name: Upload compiled code
+        uses: actions/upload-artifact@v3
+        with:
+          name: compiled-code
+          path: target/
+
+  test:
+    name: 🧪 Run Tests
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Run unit tests
+        run: mvn test
+
+  deploy:
+    name: 🚀 Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Build JAR (again for deploy)
+        run: mvn clean package -DskipTests
+
+      - name: Prepare SSH key
+        run: |
+          echo "${{ secrets.EC2_KEY }}" > ec2_key.pem
+          chmod 600 ec2_key.pem
+
+      - name: Copy JAR to EC2
+        run: |
+          scp -i ec2_key.pem -o StrictHostKeyChecking=no target/*.jar ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.EC2_TARGET_DIR }}/app.jar
+
+      - name: Start app on EC2
+        run: |
+          ssh -i ec2_key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ${{ secrets.EC2_TARGET_DIR }}
+            pkill -f 'java -jar' || true
+            nohup java -jar app.jar > app.log 2>&1 &
+          EOF
